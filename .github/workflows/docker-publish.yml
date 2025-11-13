@@ -1,0 +1,62 @@
+name: "🚀 Publish Docker Image to GHCR"
+
+on:
+  # 仅当创建 "v" 开头的 tag 时触发 (例如 v1.0, v1.1.0)
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*'
+
+jobs:
+  build-and-push:
+    name: "Build & Push Image (linux/amd64)"
+    runs-on: ubuntu-latest
+    
+    # 授予 job 写入 GitHub Packages (GHCR) 的权限
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: "1. Checkout Repository"
+        uses: actions/checkout@v4
+        with:
+          # 拉取 Git LFS 文件
+          lfs: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "2. Log in to GitHub Container Registry (GHCR)"
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # GITHUB_TOKEN 是由 GitHub Actions 自动提供的
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "3. Extract Docker metadata (Tags & Labels)"
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # 镜像名称将是 ghcr.io/<your-github-username>/aichat-server
+          images: ghcr.io/${{ github.repository_owner }}/aichat-server
+          # 基于 Git tag 自动生成 Docker tag
+          # (例如: Git tag 'v1.2.0' 会创建 'ghcr.io/...:1.2.0' 和 'ghcr.io/...:latest')
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: "4. Build and Push Docker Image"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # 明确指定 x86 平台
+          platforms: linux/amd64
+          # 推送到 GHCR
+          push: true
+          # 使用步骤3中生成的 tags
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 启用 buildkit 缓存以加速后续构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

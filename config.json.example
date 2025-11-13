@@ -1,0 +1,14 @@
+{
+    "ACCESS_TOKEN": "123456",
+    "ALIYUN_API_KEY": "sk-your-api-key-here",
+    "CHAT_MODEL": "qwen-turbo",
+    "INTENT_MODEL": "qwen-turbo",
+    "SYSTEM_PROMPT": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。",
+    "ASR_DEVICE": "cpu",
+    "VAD_DEVICE": "cpu",
+    "API_TIMEOUT": 10,
+    "ai_persona": {
+        "bot_name": "Echo",
+        "system_content": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。"
+    }
+}

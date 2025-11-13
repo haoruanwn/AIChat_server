@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIChat Server 配置管理</title>
+    <link rel="stylesheet" href="/static/config.css">
+</head>
+<body>
+    <div class="wrapper">
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="logo">
+                <h2>⚙️ 配置中心</h2>
+            </div>
+            <nav class="nav-menu">
+                <a href="#api-section" class="nav-item active" data-section="api">
+                    <span class="icon">🔑</span>
+                    <span class="label">API 配置</span>
+                </a>
+                <a href="#model-section" class="nav-item" data-section="model">
+                    <span class="icon">🤖</span>
+                    <span class="label">模型配置</span>
+                </a>
+                <a href="#persona-section" class="nav-item" data-section="persona">
+                    <span class="icon">👤</span>
+                    <span class="label">AI Persona</span>
+                </a>
+                <a href="#hardware-section" class="nav-item" data-section="hardware">
+                    <span class="icon">💻</span>
+                    <span class="label">硬件配置</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="dot online"></span>
+                    <span class="status-text">在线</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <div class="header">
+                <h1>AIChat Server 配置管理</h1>
+                <p class="subtitle">在此修改服务器配置，修改后点击保存并重启服务</p>
+            </div>
+
+            <div class="content">
+                <!-- 加载状态 -->
+                <div id="loading" class="loading-spinner" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在加载配置...</p>
+                </div>
+
+                <!-- 配置表单 -->
+                <form id="configForm" class="config-form">
+                    <!-- API 配置 -->
+                    <section id="api-section" class="config-section active">
+                        <h2 class="section-title">🔑 API 配置</h2>
+                        
+                        <div class="form-group">
+                            <label for="ACCESS_TOKEN">访问令牌 (ACCESS_TOKEN)</label>
+                            <p class="field-desc">客户端连接时需要验证的令牌</p>
+                            <input type="text" id="ACCESS_TOKEN" name="ACCESS_TOKEN" placeholder="输入访问令牌">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ALIYUN_API_KEY">阿里云 API Key <span class="required">*</span></label>
+                            <p class="field-desc">从 <a href="https://bailian.console.aliyun.com/" target="_blank">阿里云控制台</a> 获取</p>
+                            <input type="password" id="ALIYUN_API_KEY" name="ALIYUN_API_KEY" placeholder="sk-xxxxxxxxxxxxx">
+                            <div class="password-hint">
+                                <input type="checkbox" id="showApiKey" onchange="togglePasswordVisibility()">
+                                <label for="showApiKey">显示密钥</label>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 模型配置 -->
+                    <section id="model-section" class="config-section">
+                        <h2 class="section-title">🤖 模型配置</h2>
+                        
+                        <div class="form-group">
+                            <label for="CHAT_MODEL">聊天模型 (CHAT_MODEL)</label>
+                            <p class="field-desc">用于常规对话的模型，推荐：qwen-turbo, qwen-plus</p>
+                            <input type="text" id="CHAT_MODEL" name="CHAT_MODEL" placeholder="qwen-turbo">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="INTENT_MODEL">意图识别模型 (INTENT_MODEL)</label>
+                            <p class="field-desc">用于识别用户意图的模型</p>
+                            <input type="text" id="INTENT_MODEL" name="INTENT_MODEL" placeholder="qwen-turbo">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="SYSTEM_PROMPT">系统提示词 (SYSTEM_PROMPT)</label>
+                            <p class="field-desc">AI 的默认角色和行为描述</p>
+                            <textarea id="SYSTEM_PROMPT" name="SYSTEM_PROMPT" rows="4" placeholder="你是一个..."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="API_TIMEOUT">API 超时时间 (API_TIMEOUT)</label>
+                            <p class="field-desc">API 调用超时时间，单位：秒</p>
+                            <input type="number" id="API_TIMEOUT" name="API_TIMEOUT" min="1" max="120" placeholder="10">
+                        </div>
+                    </section>
+
+                    <!-- AI Persona 配置 -->
+                    <section id="persona-section" class="config-section">
+                        <h2 class="section-title">👤 AI Persona（人设）</h2>
+                        
+                        <div class="form-group">
+                            <label for="botName">机器人名称</label>
+                            <p class="field-desc">AI 助手的名字</p>
+                            <input type="text" id="botName" placeholder="小凡">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="systemContent">人设描述</label>
+                            <p class="field-desc">机器人的性格和专业背景</p>
+                            <textarea id="systemContent" rows="5" placeholder="你是一个..."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="backgroundFacts">背景信息</label>
+                            <p class="field-desc">关于公司、团队的背景信息（每行一条）</p>
+                            <textarea id="backgroundFacts" rows="8" placeholder="公司名称：...\n成立时间：...\n团队成员：..."></textarea>
+                        </div>
+                    </section>
+
+                    <!-- 硬件配置 -->
+                    <section id="hardware-section" class="config-section">
+                        <h2 class="section-title">💻 硬件配置</h2>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="ASR_DEVICE">ASR 设备</label>
+                                <p class="field-desc">语音识别模型运行设备</p>
+                                <select id="ASR_DEVICE" name="ASR_DEVICE">
+                                    <option value="cpu">CPU</option>
+                                    <option value="cuda">CUDA (GPU)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="VAD_DEVICE">VAD 设备</label>
+                                <p class="field-desc">语音活动检测设备</p>
+                                <select id="VAD_DEVICE" name="VAD_DEVICE">
+                                    <option value="cpu">CPU</option>
+                                    <option value="cuda">CUDA (GPU)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 操作按钮 -->
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary" id="saveBtn" onclick="saveConfig()">
+                            💾 保存配置
+                        </button>
+                        <button type="button" class="btn btn-danger" id="restartBtn" onclick="restartService()">
+                            🔄 重启服务
+                        </button>
+                        <button type="reset" class="btn btn-secondary">
+                            ↩️ 重置
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 消息提示 -->
+            <div id="notification" class="notification" style="display: none;">
+                <div class="notification-content">
+                    <span id="notificationMessage"></span>
+                    <button class="notification-close" onclick="closeNotification()">&times;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/config.js"></script>
+</body>
+</html>

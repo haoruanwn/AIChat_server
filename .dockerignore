@@ -1,0 +1,17 @@
+# 1. 忽略本地的 Conda 虚拟环境 (6.1G)
+AIChatServerEnv/
+
+# 2. 忽略 Git 历史
+.git/
+
+# 3. 忽略运行时生成的目录 (这些将由 compose 挂载)
+model_cache/
+python_deps/
+logs/
+
+# 4. 忽略 Python 缓存和 IDE 文件
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.idea/

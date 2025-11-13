@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  aichat-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    image: aichat-server:latest
+    platform: linux/amd64
+    
+    # 映射配置 UI 端口（主服务由网页管理生命周期）
+    ports:
+      - "8080:8080"    # 配置 UI 和服务管理端口
+      - "8000:8000"    # WebSocket 服务端口（服务启动时可用）
+    
+    restart: unless-stopped
+
+    # 挂载卷
+    volumes:
+      # 配置文件持久化
+      - aichat_config:/config
+      
+      # 依赖缓存
+      - aichat-deps-vol:/app/deps
+      
+      # modelscope 缓存
+      - aichat-cache-vol:/root/.cache/modelscope
+      
+      # 日志
+      - aichat-logs-vol:/app/logs
+
+    # 环境变量
+    environment:
+      - PYTHONPATH=/app/deps
+      - CONFIG_PATH=/config/config.json
+
+# 定义持久化卷
+volumes:
+  aichat_config:
+    driver: local
+  aichat-deps-vol:
+  aichat-cache-vol:
+  aichat-logs-vol:

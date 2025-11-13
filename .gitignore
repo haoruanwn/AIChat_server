@@ -1,0 +1,21 @@
+.DS_Store
+node_modules/
+dist/
+.env
+.vscode/
+.idea/
+*.log
+coverage/
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+logs/
+
+# 忽略虚拟环境
+venv/
+AIChatServerEnv/
+
+# python 缓存文件
+__pycache__/
+*.pyc
