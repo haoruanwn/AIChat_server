@@ -1,0 +1,9 @@
+[submodule "models/FunAudioLLM/SenseVoice"]
+	path = models/FunAudioLLM/SenseVoice
+	url = https://github.com/FunAudioLLM/SenseVoice.git
+[submodule "models/FunAudioLLM/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"]
+	path = models/FunAudioLLM/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
+	url = https://www.modelscope.cn/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch.git
+[submodule "models/FunAudioLLM/iic/SenseVoiceSmall"]
+	path = models/FunAudioLLM/iic/SenseVoiceSmall
+	url = https://www.modelscope.cn/iic/SenseVoiceSmall.git
