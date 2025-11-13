@@ -1,67 +1,62 @@
-name: "🚀 Publish Docker Image to GHCR"
+name: "🚀 Publish Docker Image to GHCR (On Tag)"
 
 on:
-  # 仅当创建 "v" 开头的 tag 时触发 (例如 v1.0, v1.1.0)
   push:
     tags:
-      - 'v*.*.*'
-      - 'v*.*'
+      - 'v*'
+
 
 jobs:
   build-and-push:
-    name: "Build & Push Image (linux/amd64)"
+    name: "Build & Push Image (linux/amd64, linux/arm64)"
     runs-on: ubuntu-latest
     
-    # 授予 job 写入 GitHub Packages (GHCR) 的权限
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: "1. Checkout Repository"
+      - name: "1. Checkout Repository (with Submodules)"
         uses: actions/checkout@v4
         with:
-          # 拉取 Git LFS 文件，递归克隆子模块
           lfs: true
           token: ${{ secrets.GITHUB_TOKEN }}
           submodules: 'recursive'
 
-      - name: "2. Log in to GitHub Container Registry (GHCR)"
+      - name: "2. Set up QEMU (for Multi-Arch build)"
+        # 这一步用于模拟 ARM64 架构
+        uses: docker/setup-qemu-action@v3
+
+      - name: "3. Set up Docker Buildx"
+        # 这一步创建了一个新的 builder 实例 (使用 docker-container 驱动)
+        # 它是支持 cache-to: type=gha 和多平台构建所必需的
+        uses: docker/setup-buildx-action@v3
+      # --------------------------
+
+      - name: "4. Log in to GitHub Container Registry (GHCR)"
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          # GITHUB_TOKEN 是由 GitHub Actions 自动提供的
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: "3. Extract Docker metadata (Tags & Labels)"
+      - name: "5. Extract Docker metadata (Tags & Labels)"
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # 镜像名称将是 ghcr.io/<your-github-username>/aichat-server
           images: ghcr.io/${{ github.repository_owner }}/aichat-server
-          # 基于 Git tag 自动生成 Docker tag
-          # (例如: Git tag 'v1.2.0' 会创建 'ghcr.io/...:1.2.0' 和 'ghcr.io/...:latest')
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # 总是启用 'latest' 标签 (因为只有 Tag 才能触发此流程)
-            type=raw,value=latest,enable=true
+            type=semver,pattern={{version}},value=latest,enable=!{{is_prerelease}}
 
-      - name: "4. Set up QEMU (for Multi-Arch build)"
-        uses: docker/setup-qemu-action@v3
-
-      - name: "5. Build and Push Docker Image to GHCR"
+      - name: "6. Build and Push Docker Image to GHCR"
         uses: docker/build-push-action@v6
         with:
           context: .
-          # 支持x86_64和ARM64架构
-          platforms: linux/amd64, linux/arm64
-          # 推送到 GHCR
+          platforms: linux/amd64,linux/arm64
           push: true
-          # 使用步骤3中生成的 tags
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 启用 buildkit 缓存以加速后续构建
           cache-from: type=gha
           cache-to: type=gha,mode=max
