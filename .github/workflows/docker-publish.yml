@@ -3,8 +3,10 @@ name: "🚀 Publish Docker Image to GHCR (On Tag)"
 on:
   push:
     tags:
-      - 'v*'
-
+      # 匹配 vX.Y.Z (例如 v1.2.3, v0.0.1)
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      # 匹配 vX.Y.Z-prerelease... (例如 v1.2.3-beta.1)
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 jobs:
   build-and-push:
@@ -24,14 +26,10 @@ jobs:
           submodules: 'recursive'
 
       - name: "2. Set up QEMU (for Multi-Arch build)"
-        # 这一步用于模拟 ARM64 架构
         uses: docker/setup-qemu-action@v3
 
       - name: "3. Set up Docker Buildx"
-        # 这一步创建了一个新的 builder 实例 (使用 docker-container 驱动)
-        # 它是支持 cache-to: type=gha 和多平台构建所必需的
         uses: docker/setup-buildx-action@v3
-      # --------------------------
 
       - name: "4. Log in to GitHub Container Registry (GHCR)"
         uses: docker/login-action@v3
@@ -46,9 +44,14 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/aichat-server
           tags: |
+            # 规则 1: v1.2.3 -> 1.2.3 (或 v1.2.3-beta.1 -> 1.2.3-beta.1)
             type=semver,pattern={{version}}
+            # 规则 2: v1.2.3 -> 1.2
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{version}},value=latest,enable=!{{is_prerelease}}
+    
+            # 规则 3: 如果是稳定版 (非预发布版), 才添加 'latest' 标签
+            # 语法是 'enable=!is_prerelease' (没有大括号)
+            type=semver,pattern=latest,enable=!is_prerelease
 
       - name: "6. Build and Push Docker Image to GHCR"
         uses: docker/build-push-action@v6
