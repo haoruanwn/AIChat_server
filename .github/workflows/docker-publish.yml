@@ -21,9 +21,10 @@ jobs:
       - name: "1. Checkout Repository"
         uses: actions/checkout@v4
         with:
-          # 拉取 Git LFS 文件
+          # 拉取 Git LFS 文件，递归克隆子模块
           lfs: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: 'recursive'
 
       - name: "2. Log in to GitHub Container Registry (GHCR)"
         uses: docker/login-action@v3
@@ -44,14 +45,18 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            # 总是启用 'latest' 标签 (因为只有 Tag 才能触发此流程)
+            type=raw,value=latest,enable=true
 
-      - name: "4. Build and Push Docker Image"
+      - name: "4. Set up QEMU (for Multi-Arch build)"
+        uses: docker/setup-qemu-action@v3
+
+      - name: "5. Build and Push Docker Image to GHCR"
         uses: docker/build-push-action@v6
         with:
           context: .
-          # 明确指定 x86 平台
-          platforms: linux/amd64
+          # 支持x86_64和ARM64架构
+          platforms: linux/amd64, linux/arm64
           # 推送到 GHCR
           push: true
           # 使用步骤3中生成的 tags
