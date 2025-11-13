@@ -1,7 +1,7 @@
 from funasr import AutoModel
 import dashscope
 from tools.logger import logger
-from config.settings import global_settings
+from config.settings import global_settings, CONFIG_FILE_PATH
 
 class LLMModel:
     def __init__(self, model_name: str = None):
@@ -70,7 +70,7 @@ class LLMModel:
             logger.error(f"非流式生成异常: {str(e)}")
             # 检查是否是 API Key 问题
             if "API-KEY is invalid" in str(e) or "unauthorized" in str(e).lower():
-                logger.error("Dashscope API Key 验证失败。请检查 /config/config.json 中的 ALIYUN_API_KEY。")
+                logger.error(f"Dashscope API Key 验证失败。请检查 {CONFIG_FILE_PATH} 中的 ALIYUN_API_KEY。")
             return "抱歉，我暂时无法处理您的请求。"
 
 
@@ -106,5 +106,5 @@ class LLMModel:
         except Exception as e:
             logger.error(f"An exception occurred: {str(e)}")
             if "API-KEY is invalid" in str(e) or "unauthorized" in str(e).lower():
-                logger.error("Dashscope API Key 验证失败。请检查 /config/config.json 中的 ALIYUN_API_KEY。")
+                logger.error(f"Dashscope API Key 验证失败。请检查 {CONFIG_FILE_PATH} 中的 ALIYUN_API_KEY。")
             yield -1

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  aichat-server-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aichat-server:dev
+
+    ports:
+      - "8080:8080"
+      - "8000:8000"
+
+    restart: unless-stopped
+
+    volumes:
+      # 将本地项目挂载到容器 /app，便于热开发
+      - .:/app
+
+      # 保留依赖卷以避免在镜像内安装大量依赖
+      - aichat-deps-vol:/app/deps
+
+      # modelscope 缓存和日志
+      - aichat-cache-vol:/root/.cache/modelscope
+      - aichat-logs-vol:/app/logs
+
+    environment:
+      # 依赖路径（仍然使用 /app/deps）
+      - PYTHONPATH=/app/deps
+      # 不设置 CONFIG_PATH 以使用代码内的相对默认路径（./config/config.json）
+
+volumes:
+  aichat-deps-vol:
+  aichat-cache-vol:
+  aichat-logs-vol:

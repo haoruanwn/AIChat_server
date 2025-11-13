@@ -75,5 +75,9 @@ class Settings:
 # 创建全局单例
 global_settings = Settings()
 
-# !!! 关键：定义配置文件路径
-CONFIG_FILE_PATH = os.environ.get("CONFIG_PATH", "/config/config.json")
+# !!! 关键：定义配置文件路径（使用相对路径，基于当前工作目录）
+# 使用相对路径的好处：无论代码挂载到哪个目录（/app、/workspace 等），都会以
+# 当前工作目录为根来查找 ./config/config.json，保持本地运行和容器运行行为一致。
+_DEFAULT_CONFIG_PATH = os.path.abspath(os.path.join(os.getcwd(), "config", "config.json"))
+
+CONFIG_FILE_PATH = os.environ.get("CONFIG_PATH", _DEFAULT_CONFIG_PATH)

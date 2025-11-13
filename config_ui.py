@@ -18,7 +18,9 @@ from typing import Optional, Dict
 from tools.logger import logger
 
 app = FastAPI(title="AIChat Server Configuration UI", version="2.0.0")
-CONFIG_FILE = os.environ.get("CONFIG_PATH", "/config/config.json")
+# 默认使用当前工作目录下的 ./config/config.json，允许通过 CONFIG_PATH 环境变量覆盖
+_DEFAULT_CONFIG_PATH = os.path.abspath(os.path.join(os.getcwd(), "config", "config.json"))
+CONFIG_FILE = os.environ.get("CONFIG_PATH", _DEFAULT_CONFIG_PATH)
 CONFIG_DIR = os.path.dirname(CONFIG_FILE)
 
 # ============ 全局变量：服务进程管理 ============

@@ -1,6 +1,6 @@
 from service_manager import ServiceManager
 from tools.logger import logger
-from config.settings import global_settings
+from config.settings import global_settings, CONFIG_FILE_PATH
 from tools.registry import global_registry
 
 class TextHandler:
@@ -18,7 +18,7 @@ class TextHandler:
             logger.info(f"Received hello message with audio params: {audio_params}")
             # !!! 移除 API Key 设置逻辑
             # API Key 现在由配置文件管理，不再通过 hello 消息传递
-            logger.info("Client said hello. API configuration is managed via /config/config.json")
+            logger.info(f"Client said hello. API configuration is managed via {CONFIG_FILE_PATH}")
             # 暂时没设定可变的音频参数列表, 所以client发送过来的音频参数不会被使用
             # sample_rate = audio_params.get('sample_rate', AudioProcessor.sample_rate)
             # channels = audio_params.get('channels', AudioProcessor.CHANNELS)
