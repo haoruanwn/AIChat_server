@@ -10,6 +10,21 @@ let originalApiKey = '';
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', function() {
     setupNavigation();
+    // 如果 URL 带有 hash（例如 #model-section），根据 hash 定位到对应分区
+    if (location.hash) {
+        try {
+            const hash = location.hash.replace('#', '');
+            // 规范：hash 格式为 `${section}-section`，例如 api-section
+            const match = hash.match(/^([a-zA-Z0-9_-]+)-section$/);
+            if (match) {
+                const sec = match[1];
+                // 延迟一点以确保 DOM 已准备好
+                setTimeout(() => switchSection(sec), 50);
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
     loadConfiguration();
 });
 
@@ -19,10 +34,14 @@ function setupNavigation() {
     
     navItems.forEach(item => {
         item.addEventListener('click', function(e) {
+            // 阻止默认锚点跳转，使用平滑滚动和激活逻辑
             e.preventDefault();
-            
             const section = this.dataset.section;
-            switchSection(section);
+            if (section) {
+                switchSection(section);
+                // 更新 URL hash 为 `${section}-section`
+                try { window.history.pushState(null, '', `#${section}-section`); } catch (err) {}
+            }
         });
     });
 }
@@ -37,8 +56,19 @@ function switchSection(section) {
     });
     
     // 激活选中的导航和部分
-    document.querySelector(`[data-section="${section}"]`).classList.add('active');
-    document.getElementById(`${section}-section`).classList.add('active');
+    const navEl = document.querySelector(`[data-section="${section}"]`);
+    const secEl = document.getElementById(`${section}-section`);
+    if (navEl) navEl.classList.add('active');
+    if (secEl) {
+        secEl.classList.add('active');
+        // 平滑滚动到该分区顶部
+        try {
+            secEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (e) {
+            // 浏览器不支持 smooth 时直接定位
+            secEl.scrollIntoView();
+        }
+    }
     
     currentSection = section;
 }
