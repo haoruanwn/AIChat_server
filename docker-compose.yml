@@ -5,9 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    
     image: aichat-server:latest
-    platform: linux/amd64
     
     # 映射配置 UI 端口（主服务由网页管理生命周期）
     ports:
