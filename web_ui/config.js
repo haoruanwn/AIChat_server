@@ -173,7 +173,8 @@ async function restartService() {
         restartBtn.disabled = true;
         restartBtn.textContent = '⏳ 重启中...';
         
-        const response = await fetch('/api/restart', {
+        // 使用服务管理 API 的重启端点
+        const response = await fetch('/api/service/restart', {
             method: 'POST'
         });
         
