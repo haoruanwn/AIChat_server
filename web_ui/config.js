@@ -34,14 +34,20 @@ function setupNavigation() {
     
     navItems.forEach(item => {
         item.addEventListener('click', function(e) {
-            // 阻止默认锚点跳转，使用平滑滚动和激活逻辑
-            e.preventDefault();
-            const section = this.dataset.section;
-            if (section) {
-                switchSection(section);
-                // 更新 URL hash 为 `${section}-section`
-                try { window.history.pushState(null, '', `#${section}-section`); } catch (err) {}
+            // 只对内部链接进行处理（href 以 # 开头）
+            // 外部链接（如 /logs.html）允许正常导航
+            const href = this.getAttribute('href');
+            if (href && href.startsWith('#')) {
+                // 阻止默认锚点跳转，使用平滑滚动和激活逻辑
+                e.preventDefault();
+                const section = this.dataset.section;
+                if (section) {
+                    switchSection(section);
+                    // 更新 URL hash 为 `${section}-section`
+                    try { window.history.pushState(null, '', `#${section}-section`); } catch (err) {}
+                }
             }
+            // 外部链接会正常导航，不需要阻止
         });
     });
 }

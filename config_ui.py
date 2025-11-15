@@ -2,6 +2,7 @@
 AIChat Server 配置管理 UI
 Web 界面用于配置 AI Persona、API 密钥等信息
 支持启动、停止、重启 Python 服务
+实现实时日志流式传输到 WebSocket 客户端
 """
 import uvicorn
 import json
@@ -10,11 +11,13 @@ import subprocess
 import signal
 import time
 import threading
-from fastapi import FastAPI, Form, HTTPException, BackgroundTasks
+import queue
+import asyncio
+from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from tools.logger import logger
 
 app = FastAPI(title="AIChat Server Configuration UI", version="2.0.0")
@@ -23,9 +26,89 @@ _DEFAULT_CONFIG_PATH = os.path.abspath(os.path.join(os.getcwd(), "config", "conf
 CONFIG_FILE = os.environ.get("CONFIG_PATH", _DEFAULT_CONFIG_PATH)
 CONFIG_DIR = os.path.dirname(CONFIG_FILE)
 
-# ============ 全局变量：服务进程管理 ============
+# ============ 全局变量：服务进程和日志管理 ============
 service_process: Optional[subprocess.Popen] = None
 service_lock = threading.Lock()
+
+# [新增] 日志广播所需的全局变量
+log_queue: queue.Queue = queue.Queue()
+active_log_sockets: List[WebSocket] = []
+broadcast_task: Optional[asyncio.Task] = None
+reader_thread: Optional[threading.Thread] = None
+
+
+# [新增] 日志读取线程函数
+def log_reader_thread(process: subprocess.Popen, q: queue.Queue):
+    """
+    在一个单独的线程中读取子进程的stdout，并将其放入队列。
+    这可以防止主进程的I/O阻塞。
+    """
+    try:
+        # 逐行读取子进程的标准输出
+        for line in iter(process.stdout.readline, ''):
+            if not line:
+                break
+            # 1. 保留在终端的输出 (打印到 config_ui 的 stdout)
+            print(line, end='')
+            # 2. 放入队列，供WebSocket广播
+            q.put(line)
+        logger.info("Log reader thread stopped (process stdout closed).")
+    except Exception as e:
+        logger.error(f"Log reader thread error: {e}")
+    finally:
+        q.put(None)  # 发送哨兵信号，表示日志结束
+
+
+# [新增] WebSocket 广播任务
+async def websocket_broadcaster(q: queue.Queue):
+    """
+    一个常驻的 asyncio 任务，从队列中获取日志并广播。
+    """
+    loop = asyncio.get_event_loop()
+    while True:
+        try:
+            # 使用 asyncio.to_thread 异步地从同步队列中获取数据
+            line = await loop.run_in_executor(None, q.get)
+
+            if line is None:  # 收到哨兵信号
+                logger.info("Log broadcast task stopping (received sentinel).")
+                break
+
+            if not active_log_sockets:
+                continue
+
+            # [核心] 广播给所有连接的客户端
+            # 我们复制列表以防在迭代时有客户端断开连接
+            living_sockets = active_log_sockets[:]
+            for ws in living_sockets:
+                try:
+                    await ws.send_text(line)
+                except Exception:
+                    # 客户端可能已断开，从主列表中移除
+                    if ws in active_log_sockets:
+                        active_log_sockets.remove(ws)
+
+        except Exception as e:
+            logger.error(f"Log broadcaster error: {e}")
+            await asyncio.sleep(1)
+
+
+# [新增] WebSocket 端点
+@app.websocket("/ws/logs")
+async def websocket_log_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    active_log_sockets.append(websocket)
+    logger.info(f"Log client connected. Total clients: {len(active_log_sockets)}")
+    try:
+        while True:
+            # 保持连接打开，等待断开
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Log client disconnected.")
+    finally:
+        if websocket in active_log_sockets:
+            active_log_sockets.remove(websocket)
+        logger.info(f"Log client removed. Total clients: {len(active_log_sockets)}")
 
 # ============ Pydantic 模型 ============
 
@@ -59,35 +142,55 @@ if os.path.exists(static_dir):
 
 def start_service():
     """启动 Python 主服务"""
-    global service_process
-    
+    global service_process, broadcast_task, reader_thread
+
     with service_lock:
         if service_process and service_process.poll() is None:
             logger.warning("Service is already running")
             return {"success": False, "message": "服务已在运行"}
-        
+
         try:
             logger.info("Starting AIChat main service...")
-            # 启动 main.py
+
+            # [修改] 强制Python使用非缓冲的标准输出
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+
             service_process = subprocess.Popen(
                 ["python", "./main.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,  # 行缓冲
+                encoding='utf-8',
+                errors='replace',  # 避免UTF-8解码错误
+                env=env  # [修改] 传入环境变量
             )
-            
-            # 给服务一点时间启动
-            time.sleep(2)
-            
+
+            # [新增] 启动日志读取线程
+            reader_thread = threading.Thread(
+                target=log_reader_thread,
+                args=(service_process, log_queue),
+                daemon=True
+            )
+            reader_thread.start()
+
+            # [新增] 启动WebSocket广播任务 (如果它还没运行)
+            if broadcast_task is None or broadcast_task.done():
+                loop = asyncio.get_event_loop()
+                broadcast_task = loop.create_task(websocket_broadcaster(log_queue))
+                logger.info("Log broadcaster task started.")
+
+            time.sleep(1)  # 给子进程一点启动时间
+
             if service_process.poll() is None:
-                logger.info("Service started successfully")
+                logger.info(f"Service started successfully (PID: {service_process.pid})")
                 return {"success": True, "message": "服务已启动"}
             else:
-                error_msg = "服务启动失败"
+                error_msg = f"服务启动失败，退出码: {service_process.poll()}"
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
-                
+
         except Exception as e:
             error_msg = f"Failed to start service: {e}"
             logger.error(error_msg)
@@ -95,17 +198,17 @@ def start_service():
 
 def stop_service():
     """停止 Python 主服务"""
-    global service_process
-    
+    global service_process, broadcast_task, reader_thread
+
     with service_lock:
         if not service_process or service_process.poll() is not None:
             logger.warning("Service is not running")
             return {"success": False, "message": "服务未运行"}
-        
+
         try:
             logger.info("Stopping AIChat service...")
-            service_process.terminate()
-            
+            service_process.terminate()  # 发送 SIGTERM
+
             # 等待进程结束，超时 5 秒后强制杀死
             try:
                 service_process.wait(timeout=5)
@@ -113,11 +216,27 @@ def stop_service():
                 logger.warning("Service did not stop gracefully, killing it...")
                 service_process.kill()
                 service_process.wait()
-            
+
             service_process = None
             logger.info("Service stopped successfully")
+
+            # [新增] 停止相关任务
+            # 停止日志读取线程 (它会在 process.stdout 关闭时自动退出)
+            if reader_thread and reader_thread.is_alive():
+                logger.info("Waiting for log reader thread to stop...")
+                reader_thread.join(timeout=2)
+
+            # [新增] 断开所有日志客户端连接
+            for ws in active_log_sockets[:]:
+                try:
+                    # 无法在同步函数中调用 async 方法，改用循环中处理
+                    pass
+                except:
+                    pass
+            active_log_sockets.clear()
+
             return {"success": True, "message": "服务已停止"}
-            
+
         except Exception as e:
             error_msg = f"Failed to stop service: {e}"
             logger.error(error_msg)
@@ -311,7 +430,17 @@ async def config_html():
     """配置管理页面"""
     return await index()
 
-# 已将前端资源移至 web_ui/ 目录，默认静态文件由 FastAPI 的 StaticFiles 提供（见上方挂载）
+
+# [新增] 为新日志页面添加路由
+@app.get("/logs.html", response_class=HTMLResponse)
+async def get_logs_page():
+    """提供日志查看器页面"""
+    logs_html_path = os.path.join(static_dir, "logs.html")
+    if os.path.exists(logs_html_path):
+        return FileResponse(logs_html_path, media_type='text/html')
+    else:
+        return HTMLResponse("<html><body><h1>Error: logs.html not found</h1></body></html>")
+
 
 if __name__ == "__main__":
     logger.info("Starting AIChat Configuration UI server on port 8080...")

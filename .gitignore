@@ -22,3 +22,6 @@ __pycache__/
 
 # 模型缓存文件
 model_cache/
+
+# 配置缓存文件
+config.json
