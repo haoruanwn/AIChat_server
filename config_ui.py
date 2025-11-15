@@ -156,6 +156,7 @@ class AIPersonaConfig(BaseModel):
     """AI Persona 配置模型"""
     bot_name: str = "Echo"
     system_content: str = "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。"
+    background_facts: Optional[List[str]] = []
 
 class FullConfig(BaseModel):
     """完整的配置模型"""
@@ -329,7 +330,8 @@ async def get_config():
                 "API_TIMEOUT": 10,
                 "ai_persona": {
                     "bot_name": "Echo",
-                    "system_content": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。"
+                    "system_content": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。",
+                    "background_facts": []
                 }
             }}
     except Exception as e:
@@ -359,8 +361,13 @@ async def save_config(config: FullConfig):
         if not config_data.get("ai_persona"):
             config_data["ai_persona"] = {
                 "bot_name": "Echo",
-                "system_content": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。"
+                "system_content": "你是一个桌面机器人，名为Echo，友好简洁地回答用户问题。",
+                "background_facts": []
             }
+        else:
+            # 确保 background_facts 字段存在
+            if "background_facts" not in config_data["ai_persona"]:
+                config_data["ai_persona"]["background_facts"] = []
         
         # 写入文件
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:

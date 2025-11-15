@@ -157,8 +157,13 @@ function populateForm(data) {
     const el4 = document.getElementById('INTENT_MODEL');
     if (el4) el4.value = data.INTENT_MODEL || 'qwen-turbo';
     
+    // [修改] 确定唯一的"主"提示词
+    // 优先使用 SYSTEM_PROMPT，因为它目前被 chat_service.py 实际使用
+    const masterPrompt = data.SYSTEM_PROMPT || '你是一个桌面机器人, 快速地回复我.';
+    
+    // 填充隐藏的 SYSTEM_PROMPT 字段
     const el5 = document.getElementById('SYSTEM_PROMPT');
-    if (el5) el5.value = data.SYSTEM_PROMPT || '你是一个桌面机器人, 快速地回复我.';
+    if (el5) el5.value = masterPrompt;
     
     const el6 = document.getElementById('API_TIMEOUT');
     if (el6) el6.value = data.API_TIMEOUT || 10;
@@ -173,10 +178,11 @@ function populateForm(data) {
     // AI Persona Config
     if (data.ai_persona) {
         const el9 = document.getElementById('botName');
-        if (el9) el9.value = data.ai_persona.bot_name || '小凡';
+        if (el9) el9.value = data.ai_persona.bot_name || 'Echo';
         
+        // [修改] 填充可见的 systemContent 字段（也使用 masterPrompt）
         const el10 = document.getElementById('systemContent');
-        if (el10) el10.value = data.ai_persona.system_content || '';
+        if (el10) el10.value = masterPrompt; // 使用 masterPrompt 保持同步
         
         const el11 = document.getElementById('backgroundFacts');
         if (el11) {
@@ -195,41 +201,47 @@ async function saveConfig() {
     const originalText = saveBtn.textContent;
     
     try {
-        const apiKeyInput = document.getElementById('ALIYUN_API_KEY');
-        if (!apiKeyInput) {
-            console.error('API Key input not found');
-            return;
-        }
-        
-        const apiKey = apiKeyInput.value;
-        if (!apiKey || (apiKey.includes('*') && apiKey === originalApiKey)) {
-            showNotification('请输入有效的阿里云 API Key', 'error');
-            switchSection('api');
-            apiKeyInput.focus();
+        // 1. 验证所有必填项
+        const validationResult = validateRequiredFields();
+        if (!validationResult.valid) {
+            // 如果有错误，跳转到第一个有问题的字段
+            if (validationResult.firstErrorSection) {
+                switchSection(validationResult.firstErrorSection);
+            }
+            // 显示详细的错误消息
+            showValidationErrorModal(validationResult.errors);
             return;
         }
         
         saveBtn.disabled = true;
         saveBtn.textContent = '保存中...';
         
+        const apiKeyInput = document.getElementById('ALIYUN_API_KEY');
         const backgroundFactsEl = document.getElementById('backgroundFacts');
         const backgroundFacts = backgroundFactsEl.value
             .split('\n')
             .map(function(line) { return line.trim(); })
             .filter(function(line) { return line.length > 0; });
         
+        // [修改] 从 *唯一可见* 的 "人设描述" 字段获取值
+        const masterSystemPrompt = document.getElementById('systemContent').value;
+        
+        // [可选但推荐] 同步更新隐藏字段的值
+        document.getElementById('SYSTEM_PROMPT').value = masterSystemPrompt;
+
+        // [修改] 构建配置对象，将 masterSystemPrompt 同时赋值给两个字段
         const config = {
             ACCESS_TOKEN: document.getElementById('ACCESS_TOKEN').value,
             ALIYUN_API_KEY: apiKeyInput.value,
             CHAT_MODEL: document.getElementById('CHAT_MODEL').value,
             INTENT_MODEL: document.getElementById('INTENT_MODEL').value,
-            SYSTEM_PROMPT: document.getElementById('SYSTEM_PROMPT').value,
+            SYSTEM_PROMPT: masterSystemPrompt, // <-- 从可见的字段获取
             ASR_DEVICE: document.getElementById('ASR_DEVICE').value,
             VAD_DEVICE: document.getElementById('VAD_DEVICE').value,
             API_TIMEOUT: parseInt(document.getElementById('API_TIMEOUT').value) || 10,
             ai_persona: {
                 bot_name: document.getElementById('botName').value,
-                system_content: document.getElementById('systemContent').value,
+                system_content: masterSystemPrompt, // <-- 从可见的字段获取
                 background_facts: backgroundFacts
             }
         };
@@ -243,7 +255,8 @@ async function saveConfig() {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('配置已保存成功！', 'success');
+            // 显示成功的模态框
+            showSuccessModal('✅ 配置已保存成功！\n\n所有设置已更新并保存到系统。');
             originalApiKey = apiKeyInput.value;
             configData = config;
         } else {
@@ -256,6 +269,291 @@ async function saveConfig() {
         saveBtn.disabled = false;
         saveBtn.textContent = originalText;
     }
+}
+
+// === Validation Functions ===
+function validateRequiredFields() {
+    const errors = [];
+    let firstErrorSection = null;
+    
+    // 验证 API 配置部分
+    const apiKey = document.getElementById('ALIYUN_API_KEY').value.trim();
+    if (!apiKey || apiKey.includes('*')) {
+        errors.push({ section: 'api', message: '阿里云 API Key（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'api';
+    }
+    
+    const accessToken = document.getElementById('ACCESS_TOKEN').value.trim();
+    if (!accessToken) {
+        errors.push({ section: 'api', message: '访问令牌（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'api';
+    }
+    
+    // 验证模型配置部分
+    const chatModel = document.getElementById('CHAT_MODEL').value.trim();
+    if (!chatModel) {
+        errors.push({ section: 'model', message: '聊天模型（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'model';
+    }
+    
+    const intentModel = document.getElementById('INTENT_MODEL').value.trim();
+    if (!intentModel) {
+        errors.push({ section: 'model', message: '意图识别模型（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'model';
+    }
+    
+    const systemPrompt = document.getElementById('SYSTEM_PROMPT').value.trim();
+    if (!systemPrompt) {
+        errors.push({ section: 'model', message: '系统提示词（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'model';
+    }
+    
+    const apiTimeout = document.getElementById('API_TIMEOUT').value.trim();
+    if (!apiTimeout || isNaN(parseInt(apiTimeout)) || parseInt(apiTimeout) <= 0) {
+        errors.push({ section: 'model', message: 'API 超时时间（必填，需为正整数）' });
+        if (!firstErrorSection) firstErrorSection = 'model';
+    }
+    
+    // 验证硬件配置部分
+    const asrDevice = document.getElementById('ASR_DEVICE').value.trim();
+    if (!asrDevice) {
+        errors.push({ section: 'hardware', message: '语音识别设备（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'hardware';
+    }
+    
+    const vadDevice = document.getElementById('VAD_DEVICE').value.trim();
+    if (!vadDevice) {
+        errors.push({ section: 'hardware', message: '语音活动检测设备（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'hardware';
+    }
+    
+    // 验证 AI Persona 配置部分
+    const botName = document.getElementById('botName').value.trim();
+    if (!botName) {
+        errors.push({ section: 'persona', message: '机器人名称（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'persona';
+    }
+    
+    const systemContent = document.getElementById('systemContent').value.trim();
+    if (!systemContent) {
+        errors.push({ section: 'persona', message: '系统内容/角色定义（必填）' });
+        if (!firstErrorSection) firstErrorSection = 'persona';
+    }
+    
+    return {
+        valid: errors.length === 0,
+        errors: errors,
+        firstErrorSection: firstErrorSection
+    };
+}
+
+// === Modal Functions ===
+function showValidationErrorModal(errors) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+    `;
+    
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.cssText = `
+        background: white;
+        border-radius: 8px;
+        padding: 30px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: slideIn 0.3s ease-out;
+    `;
+    
+    const header = document.createElement('h2');
+    header.textContent = '⚠️ 保存失败';
+    header.style.cssText = `
+        color: #d32f2f;
+        margin: 0 0 20px 0;
+        font-size: 20px;
+    `;
+    
+    const message = document.createElement('p');
+    message.textContent = '以下必填项未完成，请补充：';
+    message.style.cssText = `
+        color: #666;
+        margin: 0 0 15px 0;
+        font-size: 14px;
+    `;
+    
+    const errorList = document.createElement('ul');
+    errorList.style.cssText = `
+        margin: 0 0 25px 0;
+        padding-left: 20px;
+        list-style: none;
+    `;
+    
+    errors.forEach(function(error) {
+        const li = document.createElement('li');
+        li.style.cssText = `
+            color: #d32f2f;
+            margin-bottom: 8px;
+            font-size: 14px;
+            padding-left: 25px;
+            position: relative;
+        `;
+        li.textContent = '• ' + error.message;
+        errorList.appendChild(li);
+    });
+    
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+    `;
+    
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = '我已了解，去修改';
+    confirmBtn.style.cssText = `
+        background: #1976d2;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s;
+    `;
+    confirmBtn.onmouseover = function() { this.style.background = '#1565c0'; };
+    confirmBtn.onmouseout = function() { this.style.background = '#1976d2'; };
+    confirmBtn.addEventListener('click', function() {
+        document.body.removeChild(modal);
+    });
+    
+    buttonContainer.appendChild(confirmBtn);
+    
+    content.appendChild(header);
+    content.appendChild(message);
+    content.appendChild(errorList);
+    content.appendChild(buttonContainer);
+    
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    
+    // 添加动画样式
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function showSuccessModal(message) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+    `;
+    
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.cssText = `
+        background: white;
+        border-radius: 8px;
+        padding: 30px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: slideIn 0.3s ease-out;
+        text-align: center;
+    `;
+    
+    const successIcon = document.createElement('div');
+    successIcon.style.cssText = `
+        font-size: 48px;
+        margin-bottom: 15px;
+    `;
+    successIcon.textContent = '✅';
+    
+    const header = document.createElement('h2');
+    header.textContent = '保存成功';
+    header.style.cssText = `
+        color: #4caf50;
+        margin: 0 0 15px 0;
+        font-size: 20px;
+    `;
+    
+    const messageEl = document.createElement('p');
+    messageEl.textContent = message;
+    messageEl.style.cssText = `
+        color: #666;
+        margin: 0 0 25px 0;
+        font-size: 14px;
+        line-height: 1.6;
+        white-space: pre-line;
+    `;
+    
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+    `;
+    
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = '好的，关闭';
+    confirmBtn.style.cssText = `
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 30px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s;
+    `;
+    confirmBtn.onmouseover = function() { this.style.background = '#45a049'; };
+    confirmBtn.onmouseout = function() { this.style.background = '#4caf50'; };
+    confirmBtn.addEventListener('click', function() {
+        document.body.removeChild(modal);
+    });
+    
+    buttonContainer.appendChild(confirmBtn);
+    
+    content.appendChild(successIcon);
+    content.appendChild(header);
+    content.appendChild(messageEl);
+    content.appendChild(buttonContainer);
+    
+    modal.appendChild(content);
+    document.body.appendChild(modal);
 }
 
 // === Service Restart ===
