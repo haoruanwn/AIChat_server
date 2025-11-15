@@ -137,6 +137,19 @@ async def websocket_log_endpoint(websocket: WebSocket):
             active_log_sockets.remove(websocket)
         logger.info(f"Log client removed. Total clients: {len(active_log_sockets)}")
 
+# ============ 确保广播任务在主循环启动 ============
+
+@app.on_event("startup")
+async def on_startup():
+    """应用启动事件：初始化广播任务"""
+    global broadcast_task
+    try:
+        loop = asyncio.get_event_loop()
+        broadcast_task = loop.create_task(websocket_broadcaster(log_queue))
+        logger.info("Log broadcaster task started on app startup.")
+    except Exception as e:
+        logger.error(f"Failed to start broadcaster task: {e}")
+
 # ============ Pydantic 模型 ============
 
 class AIPersonaConfig(BaseModel):
@@ -165,109 +178,108 @@ if os.path.exists(static_dir):
     except Exception as e:
         logger.warning(f"Failed to mount static files: {e}")
 
-# ============ 服务进程管理函数 ============
+# ============ 服务进程管理函数（内部实现，无锁） ============
 
-def start_service():
-    """启动 Python 主服务"""
+def _start_service_impl():
+    """
+    启动 Python 主服务的内部实现（无锁）
+    !!! 注意：此函数不应单独调用，它假定 service_lock 已经被持有
+    """
     global service_process, broadcast_task, reader_thread
 
-    with service_lock:
-        if service_process and service_process.poll() is None:
-            logger.warning("Service is already running")
-            return {"success": False, "message": "服务已在运行"}
+    if service_process and service_process.poll() is None:
+        logger.warning("Service is already running (impl check)")
+        return {"success": False, "message": "服务已在运行"}
 
-        try:
-            logger.info("Starting AIChat main service...")
+    try:
+        logger.info("Starting AIChat main service...")
 
-            # [修改] 强制Python使用非缓冲的标准输出
-            env = os.environ.copy()
-            env['PYTHONUNBUFFERED'] = '1'
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
 
-            service_process = subprocess.Popen(
-                ["python", "./main.py"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,  # 行缓冲
-                encoding='utf-8',
-                errors='replace',  # 避免UTF-8解码错误
-                env=env  # [修改] 传入环境变量
-            )
+        service_process = subprocess.Popen(
+            ["python", "./main.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            encoding='utf-8',
+            errors='replace',
+            env=env
+        )
 
-            # [新增] 启动日志读取线程
-            reader_thread = threading.Thread(
-                target=log_reader_thread,
-                args=(service_process, log_queue),
-                daemon=True
-            )
-            reader_thread.start()
+        reader_thread = threading.Thread(
+            target=log_reader_thread,
+            args=(service_process, log_queue),
+            daemon=True
+        )
+        reader_thread.start()
 
-            # [新增] 启动WebSocket广播任务 (如果它还没运行)
-            if broadcast_task is None or broadcast_task.done():
-                loop = asyncio.get_event_loop()
+        if broadcast_task is None or broadcast_task.done():
+            # 必须在运行的事件循环上创建任务
+            try:
+                loop = asyncio.get_running_loop()
                 broadcast_task = loop.create_task(websocket_broadcaster(log_queue))
                 logger.info("Log broadcaster task started.")
+            except RuntimeError:
+                # 如果不在主线程，我们无法创建任务，这在 executor 中可能发生
+                # 这种情况下，广播任务必须在主线程启动时（例如 @app.on_event("startup")）就绪
+                logger.warning("Could not start broadcaster task from worker thread.")
+                pass
 
-            time.sleep(1)  # 给子进程一点启动时间
+        time.sleep(1)  # 这仍然是阻塞的，但因为它在 executor 中运行，所以是安全的
 
-            if service_process.poll() is None:
-                logger.info(f"Service started successfully (PID: {service_process.pid})")
-                return {"success": True, "message": "服务已启动"}
-            else:
-                error_msg = f"服务启动失败，退出码: {service_process.poll()}"
-                logger.error(error_msg)
-                return {"success": False, "message": error_msg}
-
-        except Exception as e:
-            error_msg = f"Failed to start service: {e}"
+        if service_process.poll() is None:
+            logger.info(f"Service started successfully (PID: {service_process.pid})")
+            return {"success": True, "message": "服务已启动"}
+        else:
+            error_msg = f"服务启动失败，退出码: {service_process.poll()}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
-def stop_service():
-    """停止 Python 主服务"""
-    global service_process, broadcast_task, reader_thread
+    except Exception as e:
+        error_msg = f"Failed to start service: {e}"
+        logger.error(error_msg)
+        return {"success": False, "message": error_msg}
 
-    with service_lock:
-        if not service_process or service_process.poll() is not None:
-            logger.warning("Service is not running")
-            return {"success": False, "message": "服务未运行"}
+def _stop_service_impl():
+    """
+    停止 Python 主服务的内部实现（无锁）
+    !!! 注意：此函数不应单独调用，它假定 service_lock 已经被持有
+    """
+    global service_process, reader_thread
+
+    if not service_process or service_process.poll() is not None:
+        logger.warning("Service is not running (impl check)")
+        return {"success": False, "message": "服务未运行"}
+
+    try:
+        logger.info("Stopping AIChat service...")
+        service_process.terminate()
 
         try:
-            logger.info("Stopping AIChat service...")
-            service_process.terminate()  # 发送 SIGTERM
+            service_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("Service did not stop gracefully, killing it...")
+            service_process.kill()
+            service_process.wait()
 
-            # 等待进程结束，超时 5 秒后强制杀死
-            try:
-                service_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("Service did not stop gracefully, killing it...")
-                service_process.kill()
-                service_process.wait()
+        service_process = None
+        logger.info("Service stopped successfully")
 
-            service_process = None
-            logger.info("Service stopped successfully")
+        if reader_thread and reader_thread.is_alive():
+            logger.info("Waiting for log reader thread to stop...")
+            reader_thread.join(timeout=2)
+        
+        # 注意：在同步函数中无法安全地操作异步的 active_log_sockets
+        # active_log_sockets.clear() # 最好在异步端点中处理
 
-            # [新增] 停止相关任务
-            # 停止日志读取线程 (它会在 process.stdout 关闭时自动退出)
-            if reader_thread and reader_thread.is_alive():
-                logger.info("Waiting for log reader thread to stop...")
-                reader_thread.join(timeout=2)
+        return {"success": True, "message": "服务已停止"}
 
-            # [新增] 断开所有日志客户端连接
-            for ws in active_log_sockets[:]:
-                try:
-                    # 无法在同步函数中调用 async 方法，改用循环中处理
-                    pass
-                except:
-                    pass
-            active_log_sockets.clear()
-
-            return {"success": True, "message": "服务已停止"}
-
-        except Exception as e:
-            error_msg = f"Failed to stop service: {e}"
-            logger.error(error_msg)
-            return {"success": False, "message": error_msg}
+    except Exception as e:
+        error_msg = f"Failed to stop service: {e}"
+        logger.error(error_msg)
+        return {"success": False, "message": error_msg}
 
 def get_service_status():
     """获取服务状态"""
@@ -375,87 +387,89 @@ async def save_config(config: FullConfig):
         logger.error(f"Failed to save config: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
 
-# ============ 服务生命周期管理 API ============
+# ============ 服务生命周期管理 API (重构为异步安全) ============
 
 @app.get("/api/service/status")
 async def get_service_status_endpoint():
     """获取服务状态"""
+    # get_service_status 是非阻塞的，可以直接调用
     return get_service_status()
 
 @app.post("/api/service/start")
 async def start_service_endpoint():
-    """启动服务"""
-    result = start_service()
-    # 将结果与状态信息合并
-    status = get_service_status()
-    result.update(status)
+    """启动服务 (异步安全)"""
+    
+    def sync_start_task():
+        # 在这里获取锁并调用实现
+        with service_lock:
+            result = _start_service_impl()
+        
+        status = get_service_status()
+        result.update(status)
+        return result
+
+    loop = asyncio.get_event_loop()
+    # 在 executor 中运行整个同步任务，避免阻塞事件循环
+    result = await loop.run_in_executor(None, sync_start_task)
     return result
 
 @app.post("/api/service/stop")
 async def stop_service_endpoint():
-    """停止服务"""
-    result = stop_service()
-    status = get_service_status()
-    result.update(status)
+    """停止服务 (异步安全)"""
+
+    def sync_stop_task():
+        with service_lock:
+            result = _stop_service_impl()
+        
+        status = get_service_status()
+        result.update(status)
+        return result
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, sync_stop_task)
+    
+    # [新增] 在异步上下文中安全地清理 WebSocket
+    for ws in active_log_sockets[:]:
+        try:
+            await ws.close(code=1001, reason="Service stopped")
+        except Exception:
+            pass # 客户端可能已经断开
+    active_log_sockets.clear()
+    
     return result
 
 @app.post("/api/service/restart")
 async def restart_service_endpoint():
-    """只重启 AI 聊天服务（子进程），不停止 Web 服务器"""
-    global service_process
-    
-    try:
+    """重启服务 (异步安全，已修复死锁)"""
+
+    def sync_restart_task():
+        # 1. 在这里获取唯一的锁
         with service_lock:
+            # 2. 检查服务状态
             if not service_process or service_process.poll() is not None:
                 logger.warning("Service is not running, starting it...")
-                result = start_service()
-                status = get_service_status()
-                return {
-                    "success": result.get("success", False),
-                    "message": "服务已启动",
-                    **status
-                }
-            
-            # 只重启子进程，不停止 Web 服务器
-            logger.info("Restarting AIChat service (graceful restart)...")
-            
-            # 1. 停止子进程（不等待日志读取线程）
-            old_process = service_process
-            service_process = None  # 立即清空引用，避免其他操作使用旧进程
-            
-            old_process.terminate()  # 发送 SIGTERM
-            try:
-                # 给进程短暂时间优雅关闭（2秒）
-                old_process.wait(timeout=2)
-                logger.info("Service process stopped gracefully")
-            except subprocess.TimeoutExpired:
-                logger.warning("Service did not stop gracefully, killing it...")
-                old_process.kill()
-                old_process.wait()
-            
-            # 不等待日志读取线程 - 它会自动在检测到进程关闭时退出
-            # 这避免了重启时的长等待
-            
-            time.sleep(0.2)  # 短暂延迟，确保资源释放
-            
-            # 2. 启动新的子进程
-            result = start_service()
-            status = get_service_status()
-            
-            logger.info(f"Service restart completed: {result['message']}")
-            
-            return {
-                "success": result.get("success", False),
-                "message": "AI 聊天服务已重启（WebSocket 连接保持）",
-                **status
-            }
-    except Exception as e:
-        logger.error(f"Failed to restart service: {e}")
-        return {
-            "success": False,
-            "message": f"重启失败: {e}",
-            **get_service_status()
-        }
+                # 3. 调用无锁的实现
+                result = _start_service_impl()
+            else:
+                logger.info("Restarting AIChat service...")
+                # 4. 调用无锁的停止实现
+                _stop_service_impl()
+                
+                time.sleep(0.2) # 在 executor 中 sleep 是安全的
+                
+                # 5. 调用无锁的启动实现
+                result = _start_service_impl()
+                result["message"] = "AI 聊天服务已重启"
+        
+        # 6. 获取最终状态
+        status = get_service_status()
+        result.update(status)
+        return result
+
+    loop = asyncio.get_event_loop()
+    # 7. 将整个阻塞和锁定的流程放入 executor
+    result = await loop.run_in_executor(None, sync_restart_task)
+    return result
 
 @app.get("/api/health")
 async def health_check():
