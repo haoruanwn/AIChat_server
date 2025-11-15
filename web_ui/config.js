@@ -1,85 +1,124 @@
-/**
- * AIChat Server 配置管理前端脚本
- */
+// AIChat Server - Unified Config & Logs UI
+// Supports dual-panel layout with top navbar and real-time logs
 
-// ============ 全局变量 ============
 let currentSection = 'api';
 let configData = {};
 let originalApiKey = '';
+let ws;
+let retryTimeout = 1000;
 
-// ============ 初始化 ============
+// === Initialize on page load ===
 document.addEventListener('DOMContentLoaded', function() {
-    setupNavigation();
-    // 如果 URL 带有 hash（例如 #model-section），根据 hash 定位到对应分区
-    if (location.hash) {
-        try {
-            const hash = location.hash.replace('#', '');
-            // 规范：hash 格式为 `${section}-section`，例如 api-section
-            const match = hash.match(/^([a-zA-Z0-9_-]+)-section$/);
-            if (match) {
-                const sec = match[1];
-                // 延迟一点以确保 DOM 已准备好
-                setTimeout(() => switchSection(sec), 50);
-            }
-        } catch (e) {
-            // ignore
-        }
-    }
+    setupTopNavigation();
+    setupLogsPanel();
     loadConfiguration();
+    setupFormBindings();
 });
 
-// ============ 导航栏处理 ============
-function setupNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    
+// === Top Navigation ===
+function setupTopNavigation() {
+    const navItems = document.querySelectorAll('.navbar-item');
     navItems.forEach(item => {
         item.addEventListener('click', function(e) {
-            // 只对内部链接进行处理（href 以 # 开头）
-            // 外部链接（如 /logs.html）允许正常导航
-            const href = this.getAttribute('href');
-            if (href && href.startsWith('#')) {
-                // 阻止默认锚点跳转，使用平滑滚动和激活逻辑
-                e.preventDefault();
-                const section = this.dataset.section;
-                if (section) {
-                    switchSection(section);
-                    // 更新 URL hash 为 `${section}-section`
-                    try { window.history.pushState(null, '', `#${section}-section`); } catch (err) {}
-                }
-            }
-            // 外部链接会正常导航，不需要阻止
+            e.preventDefault();
+            const section = this.dataset.section;
+            if (section) switchSection(section);
         });
     });
 }
 
 function switchSection(section) {
-    // 移除所有活跃状态
-    document.querySelectorAll('.nav-item').forEach(item => {
+    document.querySelectorAll('.navbar-item').forEach(item => {
         item.classList.remove('active');
     });
     document.querySelectorAll('.config-section').forEach(sec => {
         sec.classList.remove('active');
     });
     
-    // 激活选中的导航和部分
-    const navEl = document.querySelector(`[data-section="${section}"]`);
-    const secEl = document.getElementById(`${section}-section`);
+    const navEl = document.querySelector('[data-section="' + section + '"]');
+    const secEl = document.getElementById(section + '-section');
+    
     if (navEl) navEl.classList.add('active');
     if (secEl) {
         secEl.classList.add('active');
-        // 平滑滚动到该分区顶部
         try {
             secEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (e) {
-            // 浏览器不支持 smooth 时直接定位
             secEl.scrollIntoView();
         }
     }
-    
     currentSection = section;
 }
 
-// ============ 配置加载 ============
+// === Logs Panel ===
+function setupLogsPanel() {
+    const clearBtn = document.getElementById('clear-log-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            document.getElementById('log-output').textContent = '';
+        });
+    }
+    connectLogs();
+}
+
+function connectLogs() {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = wsProtocol + '//' + window.location.host + '/ws/logs';
+    
+    updateLogStatus('连接中...', 'connecting');
+    
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (e) {
+        console.error('WebSocket connection failed:', e);
+        updateLogStatus('连接失败', 'disconnected');
+        return;
+    }
+    
+    ws.onopen = function() {
+        console.log('Log WebSocket connected');
+        updateLogStatus('已连接', 'connected');
+        retryTimeout = 1000;
+    };
+    
+    ws.onmessage = function(event) {
+        const logOutput = document.getElementById('log-output');
+        logOutput.textContent += event.data;
+        
+        const autoscrollChk = document.getElementById('autoscroll-chk');
+        if (autoscrollChk && autoscrollChk.checked) {
+            const logsContainer = document.querySelector('.logs-container');
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+    };
+    
+    ws.onclose = function() {
+        console.log('Log WebSocket disconnected');
+        updateLogStatus('已断开', 'disconnected');
+        
+        setTimeout(function() {
+            retryTimeout = Math.min(retryTimeout * 2, 10000);
+            connectLogs();
+        }, retryTimeout);
+    };
+    
+    ws.onerror = function(error) {
+        console.error('WebSocket error:', error);
+        updateLogStatus('连接错误', 'disconnected');
+        ws.close();
+    };
+}
+
+function updateLogStatus(text, status) {
+    const statusEl = document.getElementById('log-status');
+    if (statusEl) {
+        statusEl.textContent = text;
+        statusEl.classList.remove('connecting', 'connected', 'disconnected');
+        statusEl.classList.add(status);
+    }
+}
+
+// === Config Loading ===
 async function loadConfiguration() {
     showLoading(true);
     
@@ -104,63 +143,90 @@ async function loadConfiguration() {
 }
 
 function populateForm(data) {
-    // 填充 API 配置
-    document.getElementById('ACCESS_TOKEN').value = data.ACCESS_TOKEN || '123456';
-    document.getElementById('ALIYUN_API_KEY').value = data.ALIYUN_API_KEY || '';
+    // API Config
+    const el1 = document.getElementById('ACCESS_TOKEN');
+    if (el1) el1.value = data.ACCESS_TOKEN || '123456';
     
-    // 填充模型配置
-    document.getElementById('CHAT_MODEL').value = data.CHAT_MODEL || 'qwen-turbo';
-    document.getElementById('INTENT_MODEL').value = data.INTENT_MODEL || 'qwen-turbo';
-    document.getElementById('SYSTEM_PROMPT').value = data.SYSTEM_PROMPT || '你是一个桌面机器人, 快速地回复我.';
-    document.getElementById('API_TIMEOUT').value = data.API_TIMEOUT || 10;
+    const el2 = document.getElementById('ALIYUN_API_KEY');
+    if (el2) el2.value = data.ALIYUN_API_KEY || '';
     
-    // 填充硬件配置
-    document.getElementById('ASR_DEVICE').value = data.ASR_DEVICE || 'cpu';
-    document.getElementById('VAD_DEVICE').value = data.VAD_DEVICE || 'cpu';
+    // Model Config
+    const el3 = document.getElementById('CHAT_MODEL');
+    if (el3) el3.value = data.CHAT_MODEL || 'qwen-turbo';
     
-    // 填充 AI Persona 配置
+    const el4 = document.getElementById('INTENT_MODEL');
+    if (el4) el4.value = data.INTENT_MODEL || 'qwen-turbo';
+    
+    const el5 = document.getElementById('SYSTEM_PROMPT');
+    if (el5) el5.value = data.SYSTEM_PROMPT || '你是一个桌面机器人, 快速地回复我.';
+    
+    const el6 = document.getElementById('API_TIMEOUT');
+    if (el6) el6.value = data.API_TIMEOUT || 10;
+    
+    // Hardware Config
+    const el7 = document.getElementById('ASR_DEVICE');
+    if (el7) el7.value = data.ASR_DEVICE || 'cpu';
+    
+    const el8 = document.getElementById('VAD_DEVICE');
+    if (el8) el8.value = data.VAD_DEVICE || 'cpu';
+    
+    // AI Persona Config
     if (data.ai_persona) {
-        document.getElementById('botName').value = data.ai_persona.bot_name || '小凡';
-        document.getElementById('systemContent').value = data.ai_persona.system_content || '';
-        if (data.ai_persona.background_facts && Array.isArray(data.ai_persona.background_facts)) {
-            document.getElementById('backgroundFacts').value = data.ai_persona.background_facts.join('\n');
+        const el9 = document.getElementById('botName');
+        if (el9) el9.value = data.ai_persona.bot_name || '小凡';
+        
+        const el10 = document.getElementById('systemContent');
+        if (el10) el10.value = data.ai_persona.system_content || '';
+        
+        const el11 = document.getElementById('backgroundFacts');
+        if (el11) {
+            if (data.ai_persona.background_facts && Array.isArray(data.ai_persona.background_facts)) {
+                el11.value = data.ai_persona.background_facts.join('\n');
+            } else if (data.ai_persona.backgroundFacts) {
+                el11.value = data.ai_persona.backgroundFacts.join('\n');
+            }
         }
     }
 }
 
-// ============ 表单保存 ============
+// === Config Save ===
 async function saveConfig() {
     const saveBtn = document.getElementById('saveBtn');
     const originalText = saveBtn.textContent;
     
     try {
-        // 验证必填字段
-        const apiKey = document.getElementById('ALIYUN_API_KEY').value;
-        if (!apiKey || (apiKey.includes('*') && apiKey === originalApiKey)) {
-            showNotification('请输入有效的阿里云 API Key', 'error');
-            switchSection('api');
+        const apiKeyInput = document.getElementById('ALIYUN_API_KEY');
+        if (!apiKeyInput) {
+            console.error('API Key input not found');
             return;
         }
         
-        // 禁用按钮
-        saveBtn.disabled = true;
-        saveBtn.textContent = '⏳ 保存中...';
+        const apiKey = apiKeyInput.value;
+        if (!apiKey || (apiKey.includes('*') && apiKey === originalApiKey)) {
+            showNotification('请输入有效的阿里云 API Key', 'error');
+            switchSection('api');
+            apiKeyInput.focus();
+            return;
+        }
         
-        // 构建配置对象
-        const backgroundFacts = document.getElementById('backgroundFacts').value
+        saveBtn.disabled = true;
+        saveBtn.textContent = '保存中...';
+        
+        const backgroundFactsEl = document.getElementById('backgroundFacts');
+        const backgroundFacts = backgroundFactsEl.value
             .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0);
+            .map(function(line) { return line.trim(); })
+            .filter(function(line) { return line.length > 0; });
         
         const config = {
             ACCESS_TOKEN: document.getElementById('ACCESS_TOKEN').value,
-            ALIYUN_API_KEY: document.getElementById('ALIYUN_API_KEY').value,
+            ALIYUN_API_KEY: apiKeyInput.value,
             CHAT_MODEL: document.getElementById('CHAT_MODEL').value,
             INTENT_MODEL: document.getElementById('INTENT_MODEL').value,
             SYSTEM_PROMPT: document.getElementById('SYSTEM_PROMPT').value,
             ASR_DEVICE: document.getElementById('ASR_DEVICE').value,
             VAD_DEVICE: document.getElementById('VAD_DEVICE').value,
-            API_TIMEOUT: parseInt(document.getElementById('API_TIMEOUT').value),
+            API_TIMEOUT: parseInt(document.getElementById('API_TIMEOUT').value) || 10,
             ai_persona: {
                 bot_name: document.getElementById('botName').value,
                 system_content: document.getElementById('systemContent').value,
@@ -168,150 +234,147 @@ async function saveConfig() {
             }
         };
         
-        // 发送保存请求
         const response = await fetch('/api/config', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
         
         const result = await response.json();
         
-        if (result.success) {
-            showNotification('✅ 配置已保存成功！', 'success');
-            originalApiKey = document.getElementById('ALIYUN_API_KEY').value;
+        if (response.ok && result.success) {
+            showNotification('配置已保存成功！', 'success');
+            originalApiKey = apiKeyInput.value;
             configData = config;
         } else {
-            showNotification('❌ 保存失败：' + (result.error || '未知错误'), 'error');
+            showNotification('保存失败：' + (result.error || result.detail || '未知错误'), 'error');
         }
     } catch (error) {
         console.error('Error saving config:', error);
-        showNotification('❌ 保存异常：' + error.message, 'error');
+        showNotification('保存异常：' + error.message, 'error');
     } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = originalText;
     }
 }
 
-// ============ 服务重启 ============
+// === Service Restart ===
 async function restartService() {
     const restartBtn = document.getElementById('restartBtn');
+    if (!restartBtn) return;
+    
     const originalText = restartBtn.textContent;
     
-    // 确认对话
-    if (!confirm('确定要重启服务吗？这会中断当前的连接。')) {
+    if (!confirm('确定要重启 AI 聊天服务吗？WebSocket 连接将保持。')) {
         return;
     }
     
     try {
         restartBtn.disabled = true;
-        restartBtn.textContent = '⏳ 重启中...';
+        restartBtn.textContent = '重启中...';
         
-        // 使用服务管理 API 的重启端点
         const response = await fetch('/api/service/restart', {
             method: 'POST'
         });
         
         const result = await response.json();
         
-        if (result.success) {
-            if (result.method === 'docker') {
-                showNotification(
-                    '✅ 重启指令已发送，服务将在 10-30 秒内重启',
-                    'success'
-                );
-                // 3秒后自动刷新页面
-                setTimeout(() => {
-                    location.reload();
-                }, 3000);
-            } else {
-                // 需要手动重启
-                showNotification(
-                    '⚠️ 请手动执行以下命令重启容器：\n' +
-                    'docker-compose restart',
-                    'warning'
-                );
-            }
+        if (response.ok && result.success) {
+            showNotification('✅ AI 聊天服务已重启！WebSocket 连接保持，日志将继续显示。', 'success');
+            restartBtn.disabled = false;
+            restartBtn.textContent = originalText;
+        } else {
+            showNotification('❌ 重启失败：' + (result.message || '未知错误'), 'error');
+            restartBtn.disabled = false;
+            restartBtn.textContent = originalText;
         }
     } catch (error) {
         console.error('Error restarting service:', error);
         showNotification('❌ 重启失败：' + error.message, 'error');
-    } finally {
         restartBtn.disabled = false;
         restartBtn.textContent = originalText;
     }
 }
 
-// ============ 工具函数 ============
+// === Utilities ===
 function togglePasswordVisibility() {
     const apiKeyInput = document.getElementById('ALIYUN_API_KEY');
     const showCheckbox = document.getElementById('showApiKey');
     
-    if (showCheckbox.checked) {
-        apiKeyInput.type = 'text';
-    } else {
-        apiKeyInput.type = 'password';
+    if (apiKeyInput && showCheckbox) {
+        apiKeyInput.type = showCheckbox.checked ? 'text' : 'password';
     }
 }
 
 function showLoading(show) {
     const loading = document.getElementById('loading');
-    if (show) {
-        loading.style.display = 'flex';
-    } else {
-        loading.style.display = 'none';
+    if (loading) {
+        loading.style.display = show ? 'flex' : 'none';
     }
 }
 
-function showNotification(message, type = 'info') {
+function showNotification(message, type) {
+    type = type || 'info';
     const notification = document.getElementById('notification');
     const notificationMessage = document.getElementById('notificationMessage');
+    if (!notification || !notificationMessage) return;
     
-    // 移除现有的类
-    notification.classList.remove('success', 'error', 'warning');
-    
-    // 添加新类
-    notification.classList.add(type, 'show');
+    notification.classList.remove('success', 'error', 'warning', 'show');
+    notification.classList.add(type);
     notificationMessage.textContent = message;
     
-    // 自动关闭（5秒后）
-    setTimeout(() => {
+    void notification.offsetWidth;
+    notification.classList.add('show');
+    
+    setTimeout(function() {
         closeNotification();
     }, 5000);
 }
 
 function closeNotification() {
     const notification = document.getElementById('notification');
-    notification.classList.remove('show');
-}
-
-// ============ 表单验证 ============
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('configForm');
-    
-    // 实时验证
-    form.addEventListener('change', function() {
-        validateForm();
-    });
-});
-
-function validateForm() {
-    const apiKey = document.getElementById('ALIYUN_API_KEY').value;
-    const saveBtn = document.getElementById('saveBtn');
-    
-    // 简单验证：API Key 不为空
-    if (!apiKey || (apiKey.includes('*') && apiKey === originalApiKey)) {
-        saveBtn.disabled = false; // 允许用户重新输入
+    if (notification) {
+        notification.classList.remove('show');
     }
 }
 
-// ============ 快捷键 ============
+// === Form Bindings ===
+function setupFormBindings() {
+    const form = document.getElementById('configForm');
+    if (form) {
+        form.addEventListener('input', function() {
+            validateForm();
+        });
+    }
+    
+    const showApiKey = document.getElementById('showApiKey');
+    if (showApiKey) {
+        showApiKey.addEventListener('change', togglePasswordVisibility);
+    }
+    
+    const saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveConfig);
+    }
+    
+    const restartBtn = document.getElementById('restartBtn');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', restartService);
+    }
+}
+
+function validateForm() {
+    const apiKeyEl = document.getElementById('ALIYUN_API_KEY');
+    const apiKey = apiKeyEl ? apiKeyEl.value : '';
+    // Additional validation can be added here
+}
+
+// === Keyboard Shortcuts ===
 document.addEventListener('keydown', function(e) {
-    // Ctrl/Cmd + S: 保存
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        saveConfig();
+        if (document.getElementById('configForm')) {
+            e.preventDefault();
+            saveConfig();
+        }
     }
 });

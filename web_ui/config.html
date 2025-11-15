@@ -3,54 +3,256 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIChat Server 配置管理</title>
+    <title>AIChat Server 配置管理 & 实时日志</title>
     <link rel="stylesheet" href="/static/config.css">
+    <style>
+        /* 新的双栏布局样式 */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #f5f5f5;
+        }
+
+        /* 顶部导航栏 */
+        .top-navbar {
+            background: #1e293b;
+            border-bottom: 2px solid #334155;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            height: 60px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-logo {
+            padding: 0 20px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-right: 1px solid #334155;
+            height: 100%;
+        }
+
+        .navbar-menu {
+            display: flex;
+            gap: 0;
+            flex: 1;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 20px;
+            color: #94a3b8;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            text-decoration: none;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .navbar-item:hover {
+            color: #e2e8f0;
+            background: #0f172a;
+        }
+
+        .navbar-item.active {
+            color: #fff;
+            border-bottom-color: #3b82f6;
+            background: #0f172a;
+        }
+
+        .navbar-item .icon {
+            font-size: 16px;
+        }
+
+        /* 内容区域 - 左右布局 */
+        .content-area {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            gap: 0;
+        }
+
+        /* 左侧配置区域 */
+        .config-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background: white;
+            border-right: 1px solid #e2e8f0;
+        }
+
+        /* 右侧日志区域 */
+        .logs-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .logs-header {
+            padding: 15px 20px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logs-header h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .logs-status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            background: #f59e0b;
+            color: #1e293b;
+        }
+
+        .logs-status.connected {
+            background: #10b981;
+            color: #fff;
+        }
+
+        .logs-status.disconnected {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        .logs-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            font-family: 'SF Mono', 'Menlo', 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .logs-output {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+        }
+
+        .logs-footer {
+            padding: 10px 15px;
+            background: #1e293b;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .logs-footer button {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: #334155;
+            color: #e2e8f0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .logs-footer button:hover {
+            background: #475569;
+        }
+
+        .logs-footer label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #e2e8f0;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+
+        .logs-footer input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .content-area {
+                flex-direction: column;
+            }
+
+            .config-panel {
+                border-right: none;
+                border-bottom: 1px solid #e2e8f0;
+                max-height: 50%;
+            }
+
+            .logs-panel {
+                max-height: 50%;
+            }
+        }
+
+        /* 隐藏原来的侧边栏 */
+        .sidebar {
+            display: none !important;
+        }
+
+        /* 调整主容器 */
+        .wrapper {
+            display: block;
+            height: 100vh;
+        }
+
+        /* 调整原有的 main-content */
+        .main-content {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-    <div class="wrapper">
-        <!-- 侧边栏 -->
-        <div class="sidebar">
-            <div class="logo">
-                <h2>⚙️ 配置中心</h2>
+    <div class="main-container">
+        <!-- 顶部导航栏 -->
+        <nav class="top-navbar">
+            <div class="navbar-logo">
+                <span>⚙️</span>
+                <span>AIChat Server</span>
             </div>
-            <nav class="nav-menu">
-                <a href="#api-section" class="nav-item active" data-section="api">
-                    <span class="icon">🔑</span>
-                    <span class="label">API 配置</span>
+            <div class="navbar-menu">
+                <a href="#api-section" class="navbar-item active" data-section="api">
+                    <span class="icon">�</span>
+                    <span>API 配置</span>
                 </a>
-                <a href="#model-section" class="nav-item" data-section="model">
+                <a href="#model-section" class="navbar-item" data-section="model">
                     <span class="icon">🤖</span>
-                    <span class="label">模型配置</span>
+                    <span>模型配置</span>
                 </a>
-                <a href="#persona-section" class="nav-item" data-section="persona">
-                    <span class="icon">👤</span>
-                    <span class="label">AI Persona</span>
+                <a href="#persona-section" class="navbar-item" data-section="persona">
+                    <span class="icon">�</span>
+                    <span>AI Persona</span>
                 </a>
-                <a href="#hardware-section" class="nav-item" data-section="hardware">
+                <a href="#hardware-section" class="navbar-item" data-section="hardware">
                     <span class="icon">💻</span>
-                    <span class="label">硬件配置</span>
+                    <span>硬件配置</span>
                 </a>
-                <a href="/logs.html" class="nav-item" data-section="logs">
-                    <span class="icon">📜</span>
-                    <span class="label">服务日志</span>
-                </a>
-            </nav>
-            <div class="sidebar-footer">
-                <div class="status-indicator">
-                    <span class="dot online"></span>
-                    <span class="status-text">在线</span>
-                </div>
             </div>
-        </div>
+        </nav>
 
-        <!-- 主内容区 -->
-        <div class="main-content">
-            <div class="header">
-                <h1>AIChat Server 配置管理</h1>
-                <p class="subtitle">在此修改服务器配置，修改后点击保存并重启服务</p>
-            </div>
-
-            <div class="content">
+        <!-- 左右双栏内容区 -->
+        <div class="content-area">
+            <!-- 左侧：配置区域 -->
+            <div class="config-panel">
                 <!-- 加载状态 -->
                 <div id="loading" class="loading-spinner" style="display: none;">
                     <div class="spinner"></div>
@@ -74,7 +276,7 @@
                             <p class="field-desc">从 <a href="https://bailian.console.aliyun.com/" target="_blank">阿里云控制台</a> 获取</p>
                             <input type="password" id="ALIYUN_API_KEY" name="ALIYUN_API_KEY" placeholder="sk-xxxxxxxxxxxxx">
                             <div class="password-hint">
-                                <input type="checkbox" id="showApiKey" onchange="togglePasswordVisibility()">
+                                <input type="checkbox" id="showApiKey">
                                 <label for="showApiKey">显示密钥</label>
                             </div>
                         </div>
@@ -159,10 +361,10 @@
 
                     <!-- 操作按钮 -->
                     <div class="form-actions">
-                        <button type="button" class="btn btn-primary" id="saveBtn" onclick="saveConfig()">
+                        <button type="button" class="btn btn-primary" id="saveBtn">
                             💾 保存配置
                         </button>
-                        <button type="button" class="btn btn-danger" id="restartBtn" onclick="restartService()">
+                        <button type="button" class="btn btn-danger" id="restartBtn">
                             🔄 重启服务
                         </button>
                         <button type="reset" class="btn btn-secondary">
@@ -170,13 +372,31 @@
                         </button>
                     </div>
                 </form>
+
+                <!-- 消息提示 -->
+                <div id="notification" class="notification" style="display: none;">
+                    <div class="notification-content">
+                        <span id="notificationMessage"></span>
+                        <button class="notification-close" onclick="closeNotification()">&times;</button>
+                    </div>
+                </div>
             </div>
 
-            <!-- 消息提示 -->
-            <div id="notification" class="notification" style="display: none;">
-                <div class="notification-content">
-                    <span id="notificationMessage"></span>
-                    <button class="notification-close" onclick="closeNotification()">&times;</button>
+            <!-- 右侧：实时日志区域 -->
+            <div class="logs-panel">
+                <div class="logs-header">
+                    <h3>📊 实时服务日志</h3>
+                    <div id="log-status" class="logs-status">连接中...</div>
+                </div>
+                <div class="logs-container">
+                    <pre id="log-output" class="logs-output"></pre>
+                </div>
+                <div class="logs-footer">
+                    <button id="clear-log-btn">清空日志</button>
+                    <label for="autoscroll-chk">
+                        <input type="checkbox" id="autoscroll-chk" checked>
+                        自动滚动
+                    </label>
                 </div>
             </div>
         </div>

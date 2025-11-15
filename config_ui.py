@@ -42,37 +42,64 @@ def log_reader_thread(process: subprocess.Popen, q: queue.Queue):
     """
     在一个单独的线程中读取子进程的stdout，并将其放入队列。
     这可以防止主进程的I/O阻塞。
+    
+    注意：这个线程会在进程关闭时自动退出，不需要等待。
     """
     try:
         # 逐行读取子进程的标准输出
-        for line in iter(process.stdout.readline, ''):
+        while True:
+            line = process.stdout.readline()
             if not line:
+                # 进程stdout已关闭
+                logger.info("Log reader thread detected process stdout closed")
                 break
+            
             # 1. 保留在终端的输出 (打印到 config_ui 的 stdout)
-            print(line, end='')
+            print(line, end='', flush=True)
             # 2. 放入队列，供WebSocket广播
-            q.put(line)
-        logger.info("Log reader thread stopped (process stdout closed).")
+            try:
+                q.put(line, timeout=1.0)  # 1秒超时，避免队列满导致阻塞
+            except queue.Full:
+                logger.warning("Log queue is full, dropping oldest messages")
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+                q.put(line)
+                
     except Exception as e:
         logger.error(f"Log reader thread error: {e}")
     finally:
-        q.put(None)  # 发送哨兵信号，表示日志结束
+        # 尝试发送哨兵信号，但不阻塞
+        try:
+            q.put(None, timeout=0.5)
+        except queue.Full:
+            pass  # 队列满，不强制等待
 
 
 # [新增] WebSocket 广播任务
 async def websocket_broadcaster(q: queue.Queue):
     """
     一个常驻的 asyncio 任务，从队列中获取日志并广播。
+    使用超时避免卡顿。
     """
     loop = asyncio.get_event_loop()
     while True:
         try:
-            # 使用 asyncio.to_thread 异步地从同步队列中获取数据
-            line = await loop.run_in_executor(None, q.get)
+            # 使用超时的 queue.get 避免永久卡顿
+            # 在 asyncio 中执行阻塞的 queue.get
+            def get_with_timeout():
+                try:
+                    return q.get(timeout=1.0)  # 1秒超时
+                except queue.Empty:
+                    return None  # 队列空，返回 None
+            
+            line = await loop.run_in_executor(None, get_with_timeout)
 
-            if line is None:  # 收到哨兵信号
-                logger.info("Log broadcast task stopping (received sentinel).")
-                break
+            # 如果队列空超时，继续等待下一条消息
+            if line is None:
+                await asyncio.sleep(0.1)
+                continue
 
             if not active_log_sockets:
                 continue
@@ -374,18 +401,54 @@ async def stop_service_endpoint():
 
 @app.post("/api/service/restart")
 async def restart_service_endpoint():
-    """重启服务"""
+    """只重启 AI 聊天服务（子进程），不停止 Web 服务器"""
+    global service_process
+    
     try:
-        stop_result = stop_service()
-        time.sleep(1)
-        start_result = start_service()
-        
-        status = get_service_status()
-        return {
-            "success": start_result.get("success", False),
-            "message": "服务已重启",
-            **status
-        }
+        with service_lock:
+            if not service_process or service_process.poll() is not None:
+                logger.warning("Service is not running, starting it...")
+                result = start_service()
+                status = get_service_status()
+                return {
+                    "success": result.get("success", False),
+                    "message": "服务已启动",
+                    **status
+                }
+            
+            # 只重启子进程，不停止 Web 服务器
+            logger.info("Restarting AIChat service (graceful restart)...")
+            
+            # 1. 停止子进程（不等待日志读取线程）
+            old_process = service_process
+            service_process = None  # 立即清空引用，避免其他操作使用旧进程
+            
+            old_process.terminate()  # 发送 SIGTERM
+            try:
+                # 给进程短暂时间优雅关闭（2秒）
+                old_process.wait(timeout=2)
+                logger.info("Service process stopped gracefully")
+            except subprocess.TimeoutExpired:
+                logger.warning("Service did not stop gracefully, killing it...")
+                old_process.kill()
+                old_process.wait()
+            
+            # 不等待日志读取线程 - 它会自动在检测到进程关闭时退出
+            # 这避免了重启时的长等待
+            
+            time.sleep(0.2)  # 短暂延迟，确保资源释放
+            
+            # 2. 启动新的子进程
+            result = start_service()
+            status = get_service_status()
+            
+            logger.info(f"Service restart completed: {result['message']}")
+            
+            return {
+                "success": result.get("success", False),
+                "message": "AI 聊天服务已重启（WebSocket 连接保持）",
+                **status
+            }
     except Exception as e:
         logger.error(f"Failed to restart service: {e}")
         return {
@@ -429,17 +492,6 @@ async def index():
 async def config_html():
     """配置管理页面"""
     return await index()
-
-
-# [新增] 为新日志页面添加路由
-@app.get("/logs.html", response_class=HTMLResponse)
-async def get_logs_page():
-    """提供日志查看器页面"""
-    logs_html_path = os.path.join(static_dir, "logs.html")
-    if os.path.exists(logs_html_path):
-        return FileResponse(logs_html_path, media_type='text/html')
-    else:
-        return HTMLResponse("<html><body><h1>Error: logs.html not found</h1></body></html>")
 
 
 if __name__ == "__main__":
